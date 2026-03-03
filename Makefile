@@ -1,5 +1,6 @@
 WASM_JS := web/msdf_atlas.js
 WASM_WASM := web/msdf_atlas.wasm
+EMXX ?= em++
 
 MSDF_ATLAS_SOURCES := \
 	msdf-atlas-gen/Charset.cpp \
@@ -48,7 +49,7 @@ wasm: $(WASM_JS)
 
 $(WASM_JS): wasm/atlas_wasm.cpp msdfgen/msdfgen-config.h $(MSDF_ATLAS_SOURCES) $(MSDFGEN_SOURCES)
 	mkdir -p web
-	nix shell nixpkgs#emscripten --command bash -lc "em++ -O3 -std=c++17 -sWASM=1 -sMODULARIZE=1 -sEXPORT_NAME=MSDFAtlasWasm -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=web -sFILESYSTEM=0 -sUSE_FREETYPE=1 -DMSDFGEN_DISABLE_SVG -DMSDFGEN_DISABLE_PNG -DMSDF_ATLAS_NO_ARTERY_FONT -I. -Iartery-font-format -Imsdf-atlas-gen -Imsdfgen -Imsdfgen/core -Imsdfgen/ext wasm/atlas_wasm.cpp $(MSDF_ATLAS_SOURCES) $(MSDFGEN_SOURCES) -o $(WASM_JS) -sEXPORTED_FUNCTIONS='[\"_mag_alloc\",\"_mag_free\",\"_mag_generate\",\"_mag_release_result\"]' -sEXPORTED_RUNTIME_METHODS='[\"UTF8ToString\",\"HEAPU8\",\"HEAPU32\",\"HEAPF32\"]'"
+	$(EMXX) -O3 -std=c++17 -sWASM=1 -sMODULARIZE=1 -sEXPORT_NAME=MSDFAtlasWasm -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=web -sFILESYSTEM=0 -sUSE_FREETYPE=1 -DMSDFGEN_DISABLE_SVG -DMSDFGEN_DISABLE_PNG -DMSDF_ATLAS_NO_ARTERY_FONT -I. -Iartery-font-format -Imsdf-atlas-gen -Imsdfgen -Imsdfgen/core -Imsdfgen/ext wasm/atlas_wasm.cpp $(MSDF_ATLAS_SOURCES) $(MSDFGEN_SOURCES) -o $(WASM_JS) -sEXPORTED_FUNCTIONS='["_mag_alloc","_mag_free","_mag_generate","_mag_release_result"]' -sEXPORTED_RUNTIME_METHODS='["UTF8ToString","HEAPU8","HEAPU32","HEAPF32"]'
 
 serve: wasm
 	python3 -m http.server 8080 --directory web
