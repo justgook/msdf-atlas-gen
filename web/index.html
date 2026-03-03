@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>msdf-atlas-gen wasm demo</title>
+  <style>
+    :root { --bg:#0b1220; --panel:#111a2b; --muted:#9cb3d2; --text:#e5eefc; --accent:#4dd0e1; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Avenir Next", "Segoe UI", sans-serif; background: linear-gradient(140deg, #08111d, #111a2b); color: var(--text); }
+    .wrap { display: grid; grid-template-columns: 420px 1fr; gap: 14px; min-height: 100vh; padding: 14px; }
+    .panel { background: rgba(17, 26, 43, 0.9); border: 1px solid #1e2c47; border-radius: 12px; padding: 12px; }
+    h1 { margin: 0 0 10px; font-size: 16px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+    input, select, textarea, button { width: 100%; border-radius: 8px; border: 1px solid #2a3b5f; background: #0d1525; color: var(--text); padding: 8px 10px; font: inherit; }
+    textarea { min-height: 70px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+    .downloads { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-top: 8px; }
+    button { cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .status { margin-top: 8px; min-height: 18px; font-size: 12px; color: #c4d9f5; }
+    .preview { display: grid; gap: 10px; }
+    .atlas-box { background: #050c18; border: 1px solid #1e2c47; border-radius: 10px; padding: 8px; overflow: auto; }
+    .preview-controls { display: grid; grid-template-columns: 170px 1fr; gap: 8px; }
+    .effect-controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .renderer-controls { display: grid; grid-template-columns: 1fr; gap: 8px; }
+    details.atlas-panel { background: #050c18; border: 1px solid #1e2c47; border-radius: 10px; padding: 6px 8px 8px; }
+    details.atlas-panel > summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    .toggle-line { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+    .toggle-line input { width: auto; }
+    .renderer-box { background: #050c18; border: 1px solid #1e2c47; border-radius: 10px; padding: 8px; display: grid; gap: 8px; }
+    .renderer-box h2 { margin: 2px 0; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    msdf-text, mtsdf-text { height: 150px; }
+    canvas { image-rendering: pixelated; }
+    pre { margin: 0; white-space: pre-wrap; font-size: 12px; color: #c6d7ef; max-height: 38vh; overflow: auto; }
+    @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h1>Wasm Atlas Builder</h1>
+      <label>Font file (TTF/OTF)</label>
+      <input id="font" type="file" accept=".ttf,.otf,font/ttf,font/otf">
+
+      <label>Characters to include</label>
+      <textarea id="chars"> !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~</textarea>
+
+      <div class="row">
+        <div>
+          <label>Atlas type</label>
+          <select id="type">
+            <option value="0">SDF</option>
+            <option value="1">PSDF</option>
+            <option value="2">MSDF</option>
+            <option value="3" selected>MTSDF</option>
+          </select>
+        </div>
+        <div>
+          <label>Edge coloring</label>
+          <select id="coloring">
+            <option value="0">Simple</option>
+            <option value="1" selected>InkTrap</option>
+            <option value="2">Distance</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><label>Size (px/em)</label><input id="size" type="number" value="48" min="8" step="1"></div>
+        <div><label>Px range</label><input id="range" type="number" value="8" min="1" step="0.5"></div>
+      </div>
+
+      <div class="row">
+        <div><label>Fixed width (0 auto)</label><input id="w" type="number" value="0" min="0" step="1"></div>
+        <div><label>Fixed height (0 auto)</label><input id="h" type="number" value="0" min="0" step="1"></div>
+      </div>
+
+      <div class="actions">
+        <button id="generate">Generate</button>
+        <button id="clear">Clear</button>
+      </div>
+      <div class="downloads">
+        <button id="dlBin" disabled>Download .bin</button>
+        <button id="dlPng" disabled>Download .png</button>
+        <button id="dlJson" disabled>Download .json</button>
+        <button id="dlArfont" disabled>Download .arfont</button>
+      </div>
+      <div id="status" class="status"></div>
+    </div>
+
+    <div class="panel preview">
+      <div class="preview-controls">
+        <div>
+          <label>Atlas preview</label>
+          <select id="atlasView">
+            <option value="rgb">RGB</option>
+            <option value="alpha">Alpha</option>
+            <option value="median">Median</option>
+          </select>
+        </div>
+        <div></div>
+      </div>
+      <div class="toggle-line">
+        <input id="showBoth" type="checkbox">
+        <label for="showBoth" style="margin:0">Show both renderers (debug)</label>
+      </div>
+      <details class="atlas-panel">
+        <summary>Generated atlas texture preview (collapsed by default)</summary>
+        <div class="atlas-box">
+          <canvas id="atlas" width="8" height="8"></canvas>
+        </div>
+      </details>
+      <div class="renderer-box">
+        <div class="renderer-controls">
+          <div>
+            <label>Live render text (updates immediately)</label>
+            <input id="renderText" type="text" value="The quick brown fox jumps over the lazy dog">
+          </div>
+          <div class="effect-controls">
+            <div>
+              <label>MTSDF effect</label>
+              <select id="effectMode">
+                <option value="fill">Fill</option>
+                <option value="outline">Outline</option>
+                <option value="glow">Glow</option>
+                <option value="shadow">Shadow</option>
+                <option value="combo">Combo</option>
+              </select>
+            </div>
+            <div>
+              <label>Stroke</label>
+              <input id="stroke" type="range" min="0" max="6" step="0.1" value="2.5">
+            </div>
+            <div>
+              <label>Glow</label>
+              <input id="glow" type="range" min="0" max="4" step="0.05" value="2">
+            </div>
+          </div>
+        </div>
+        <h2 id="msdfTitle">&lt;msdf-text&gt;</h2>
+        <msdf-text id="msdfRenderer" size="54">The quick brown fox jumps over the lazy dog</msdf-text>
+        <h2 id="mtsdfTitle">&lt;mtsdf-text&gt;</h2>
+        <mtsdf-text id="mtsdfRenderer" size="54" effect="fill" stroke="2.5" glow="2" shadow-x="4" shadow-y="-4">The quick brown fox jumps over the lazy dog</mtsdf-text>
+      </div>
+      <pre id="json">No output yet.</pre>
+    </div>
+  </div>
+
+  <script type="module" src="./font-elements.js"></script>
+  <script src="./msdf_atlas.js"></script>
+  <script>
+    (async function () {
+      const statusEl = document.getElementById('status');
+      const atlasCanvas = document.getElementById('atlas');
+      const jsonEl = document.getElementById('json');
+      const atlasViewEl = document.getElementById('atlasView');
+      const renderTextEl = document.getElementById('renderText');
+      const showBothEl = document.getElementById('showBoth');
+      const effectModeEl = document.getElementById('effectMode');
+      const strokeEl = document.getElementById('stroke');
+      const glowEl = document.getElementById('glow');
+      const msdfTitleEl = document.getElementById('msdfTitle');
+      const mtsdfTitleEl = document.getElementById('mtsdfTitle');
+      const msdfRendererEl = document.getElementById('msdfRenderer');
+      const mtsdfRendererEl = document.getElementById('mtsdfRenderer');
+
+      const fontEl = document.getElementById('font');
+      const charsEl = document.getElementById('chars');
+      const typeEl = document.getElementById('type');
+      const coloringEl = document.getElementById('coloring');
+      const sizeEl = document.getElementById('size');
+      const rangeEl = document.getElementById('range');
+      const wEl = document.getElementById('w');
+      const hEl = document.getElementById('h');
+
+      const generateBtn = document.getElementById('generate');
+      const clearBtn = document.getElementById('clear');
+      const dlBinBtn = document.getElementById('dlBin');
+      const dlPngBtn = document.getElementById('dlPng');
+      const dlJsonBtn = document.getElementById('dlJson');
+      const dlArfontBtn = document.getElementById('dlArfont');
+
+      const Module = await MSDFAtlasWasm();
+
+      function setStatus(msg, isError) {
+        statusEl.textContent = msg;
+        statusEl.style.color = isError ? '#ff9f9f' : '#c4d9f5';
+      }
+
+      function collectCodepoints(text) {
+        const unique = new Set();
+        for (const ch of text) unique.add(ch.codePointAt(0));
+        return new Uint32Array([...unique]);
+      }
+
+      function toRgbaBytes(bytes, channels, mode) {
+        const pxCount = Math.floor(bytes.length / channels);
+        const out = new Uint8ClampedArray(pxCount * 4);
+        const view = mode || 'rgb';
+        if (channels === 1) {
+          for (let i = 0; i < pxCount; i++) {
+            const v = bytes[i];
+            const o = i * 4;
+            out[o] = v;
+            out[o + 1] = v;
+            out[o + 2] = v;
+            out[o + 3] = 255;
+          }
+        } else if (channels === 3) {
+          for (let i = 0; i < pxCount; i++) {
+            const o = i * 4;
+            const s = i * 3;
+            if (view === 'median') {
+              const r = bytes[s];
+              const g = bytes[s + 1];
+              const b = bytes[s + 2];
+              const v = Math.max(Math.min(r, g), Math.min(Math.max(r, g), b));
+              out[o] = v;
+              out[o + 1] = v;
+              out[o + 2] = v;
+            } else {
+              out[o] = bytes[s];
+              out[o + 1] = bytes[s + 1];
+              out[o + 2] = bytes[s + 2];
+            }
+            out[o + 3] = 255;
+          }
+        } else if (channels === 4) {
+          for (let i = 0; i < pxCount; i++) {
+            const o = i * 4;
+            const s = i * 4;
+            const r = bytes[s];
+            const g = bytes[s + 1];
+            const b = bytes[s + 2];
+            const a = bytes[s + 3];
+            if (view === 'alpha') {
+              out[o] = a;
+              out[o + 1] = a;
+              out[o + 2] = a;
+            } else if (view === 'median') {
+              const v = Math.max(Math.min(r, g), Math.min(Math.max(r, g), b));
+              out[o] = v;
+              out[o + 1] = v;
+              out[o + 2] = v;
+            } else {
+              out[o] = r;
+              out[o + 1] = g;
+              out[o + 2] = b;
+            }
+            out[o + 3] = 255;
+          }
+        }
+        return out;
+      }
+
+      function drawAtlas(width, height, channels, bytes, mode) {
+        atlasCanvas.width = width;
+        atlasCanvas.height = height;
+        atlasCanvas.style.width = Math.min(width * 2, 960) + 'px';
+        const ctx = atlasCanvas.getContext('2d');
+        const rgba = toRgbaBytes(bytes, channels, mode);
+        const image = new ImageData(new Uint8ClampedArray(rgba), width, height);
+        ctx.putImageData(image, 0, 0);
+      }
+
+      function downloadBytes(name, bytes, mime) {
+        const blob = new Blob([bytes], { type: mime });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      }
+
+      function canvasToPngBlob(canvas) {
+        return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      }
+
+      let last = null;
+
+      function applyRendererOptions() {
+        mtsdfRendererEl.setAttribute('effect', effectModeEl.value);
+        mtsdfRendererEl.setAttribute('stroke', strokeEl.value);
+        mtsdfRendererEl.setAttribute('glow', glowEl.value);
+      }
+
+      function updateRendererVisibility() {
+        const showBoth = showBothEl.checked;
+        const typeName = (last && last.typeName) || null;
+        const showMsdf = showBoth || typeName === 'msdf';
+        const showMtsdf = showBoth || typeName === 'mtsdf' || typeName === 'sdf' || typeName === 'psdf';
+
+        msdfTitleEl.style.display = showMsdf ? '' : 'none';
+        msdfRendererEl.style.display = showMsdf ? '' : 'none';
+        mtsdfTitleEl.style.display = showMtsdf ? '' : 'none';
+        mtsdfRendererEl.style.display = showMtsdf ? '' : 'none';
+      }
+
+      function syncRendererText() {
+        const text = renderTextEl.value || '';
+        msdfRendererEl.textContent = text;
+        mtsdfRendererEl.textContent = text;
+      }
+
+      renderTextEl.addEventListener('input', syncRendererText);
+      showBothEl.addEventListener('change', updateRendererVisibility);
+      effectModeEl.addEventListener('change', applyRendererOptions);
+      strokeEl.addEventListener('input', applyRendererOptions);
+      glowEl.addEventListener('input', applyRendererOptions);
+      syncRendererText();
+      applyRendererOptions();
+      updateRendererVisibility();
+
+      generateBtn.addEventListener('click', async () => {
+        const file = fontEl.files && fontEl.files[0];
+        if (!file) {
+          setStatus('Pick a font file first.', true);
+          return;
+        }
+
+        generateBtn.disabled = true;
+        setStatus('Generating atlas...', false);
+
+        const fontBytes = new Uint8Array(await file.arrayBuffer());
+        const cps = collectCodepoints(charsEl.value || '');
+
+        const fontPtr = Module._mag_alloc(fontBytes.length);
+        Module.HEAPU8.set(fontBytes, fontPtr);
+
+        const cpPtr = Module._mag_alloc(cps.length * 4);
+        Module.HEAPU32.set(cps, cpPtr >>> 2);
+
+        const cfgPtr = Module._mag_alloc(52);
+        const cfgU32 = Module.HEAPU32;
+        const cfgF32 = Module.HEAPF32;
+        const c = cfgPtr >>> 2;
+        cfgU32[c + 0] = Number(typeEl.value);
+        cfgF32[c + 1] = Number(sizeEl.value) || 48;
+        cfgF32[c + 2] = Number(rangeEl.value) || 8;
+        cfgF32[c + 3] = 1.0;
+        cfgU32[c + 4] = Number(wEl.value) || 0;
+        cfgU32[c + 5] = Number(hEl.value) || 0;
+        cfgU32[c + 6] = Number(coloringEl.value);
+        cfgU32[c + 7] = 0;
+        cfgU32[c + 8] = 1;
+        cfgU32[c + 9] = 1;
+        cfgU32[c + 10] = 0;
+        cfgU32[c + 11] = 1;
+        cfgU32[c + 12] = 1;
+
+        const outPtr = Module._mag_alloc(48);
+        Module.HEAPU8.fill(0, outPtr, outPtr + 48);
+
+        const ok = Module._mag_generate(fontPtr, fontBytes.length, cpPtr, cps.length, cfgPtr, outPtr);
+        const o = outPtr >>> 2;
+        const okField = Module.HEAPU32[o + 0];
+
+        const atlasW = Module.HEAPU32[o + 1];
+        const atlasH = Module.HEAPU32[o + 2];
+        const atlasC = Module.HEAPU32[o + 3];
+        const atlasPtr = Module.HEAPU32[o + 4];
+        const atlasLen = Module.HEAPU32[o + 5];
+        const jsonPtr = Module.HEAPU32[o + 6];
+        const jsonLen = Module.HEAPU32[o + 7];
+        const arteryPtr = Module.HEAPU32[o + 8];
+        const arteryLen = Module.HEAPU32[o + 9];
+        const errPtr = Module.HEAPU32[o + 10];
+        const errLen = Module.HEAPU32[o + 11];
+
+        if (!ok || !okField) {
+          const err = errLen ? new TextDecoder().decode(Module.HEAPU8.slice(errPtr, errPtr + errLen)) : 'Unknown wasm error';
+          setStatus(err, true);
+          Module._mag_release_result(outPtr);
+          Module._mag_free(outPtr);
+          Module._mag_free(cfgPtr);
+          Module._mag_free(cpPtr);
+          Module._mag_free(fontPtr);
+          generateBtn.disabled = false;
+          return;
+        }
+
+        const atlasBytes = Module.HEAPU8.slice(atlasPtr, atlasPtr + atlasLen);
+        const jsonBytes = Module.HEAPU8.slice(jsonPtr, jsonPtr + jsonLen);
+        const arteryBytes = arteryLen ? Module.HEAPU8.slice(arteryPtr, arteryPtr + arteryLen) : null;
+        const jsonText = new TextDecoder().decode(jsonBytes);
+        const jsonObj = JSON.parse(jsonText);
+
+        drawAtlas(atlasW, atlasH, atlasC, atlasBytes, atlasViewEl.value);
+        jsonEl.textContent = jsonText;
+
+        const fontData = {
+          atlasBytes,
+          width: atlasW,
+          height: atlasH,
+          channels: atlasC,
+          metaJson: jsonObj
+        };
+        msdfRendererEl.setFontData(fontData);
+        mtsdfRendererEl.setFontData(fontData);
+        syncRendererText();
+
+        last = {
+          atlasBytes,
+          jsonBytes,
+          arteryBytes,
+          jsonObj,
+          atlasW,
+          atlasH,
+          atlasC,
+          typeName: ['sdf', 'psdf', 'msdf', 'mtsdf'][Number(typeEl.value)] || 'atlas'
+        };
+        updateRendererVisibility();
+
+        dlBinBtn.disabled = false;
+        dlPngBtn.disabled = false;
+        dlJsonBtn.disabled = false;
+        dlArfontBtn.disabled = !arteryBytes;
+        setStatus(`Done: ${atlasW}x${atlasH}, channels=${atlasC}, glyphs=${cps.length}`, false);
+
+        Module._mag_release_result(outPtr);
+        Module._mag_free(outPtr);
+        Module._mag_free(cfgPtr);
+        Module._mag_free(cpPtr);
+        Module._mag_free(fontPtr);
+        generateBtn.disabled = false;
+      });
+
+      clearBtn.addEventListener('click', () => {
+        const ctx = atlasCanvas.getContext('2d');
+        ctx.clearRect(0, 0, atlasCanvas.width, atlasCanvas.height);
+        jsonEl.textContent = 'No output yet.';
+        msdfRendererEl.setFontData(null);
+        mtsdfRendererEl.setFontData(null);
+        dlBinBtn.disabled = true;
+        dlPngBtn.disabled = true;
+        dlJsonBtn.disabled = true;
+        dlArfontBtn.disabled = true;
+        last = null;
+        updateRendererVisibility();
+        setStatus('Cleared.', false);
+      });
+
+      atlasViewEl.addEventListener('change', () => {
+        if (!last) return;
+        drawAtlas(last.atlasW, last.atlasH, last.atlasC, last.atlasBytes, atlasViewEl.value);
+      });
+
+      dlBinBtn.addEventListener('click', () => {
+        if (!last) return;
+        downloadBytes(`atlas-${last.typeName}-${last.atlasW}x${last.atlasH}-c${last.atlasC}.bin`, last.atlasBytes, 'application/octet-stream');
+      });
+
+      dlJsonBtn.addEventListener('click', () => {
+        if (!last) return;
+        downloadBytes(`atlas-${last.typeName}.json`, last.jsonBytes, 'application/json');
+      });
+
+      dlArfontBtn.addEventListener('click', () => {
+        if (!last || !last.arteryBytes) return;
+        downloadBytes(`atlas-${last.typeName}.arfont`, last.arteryBytes, 'application/octet-stream');
+      });
+
+      dlPngBtn.addEventListener('click', async () => {
+        if (!last) return;
+        const blob = await canvasToPngBlob(atlasCanvas);
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `atlas-${last.typeName}.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      });
+
+      setStatus('Ready. Build wasm with `make wasm` if script is missing.', false);
+    })();
+  </script>
+</body>
+</html>
